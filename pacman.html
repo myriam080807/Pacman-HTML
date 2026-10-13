@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pac-Man</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#070914;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;align-items:center;padding:18px}.game{width:min(100%,560px);text-align:center}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.logo{font-weight:900;letter-spacing:3px;color:#ffeb3b;font-size:clamp(25px,6vw,38px);text-shadow:0 0 12px #f90}.stats{display:flex;gap:14px;font-size:14px;color:#dbe3ff}.stats b{display:block;color:#fff;font-size:20px;margin-top:3px}.board-wrap{background:#000;border:3px solid #263cff;border-radius:10px;padding:8px;box-shadow:0 0 22px #1836b9}.board{width:100%;display:block;image-rendering:pixelated;touch-action:manipulation}.message{min-height:25px;color:#ffeb3b;font-size:14px;margin:10px 0}.actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}.btn{border:1px solid #6573ff;border-radius:9px;background:#171d3d;color:white;padding:10px 17px;font-weight:bold;font-size:14px;cursor:pointer}.btn:hover,.btn:focus-visible{background:#28347a;outline:2px solid #ffeb3b}.controls{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(2,48px);gap:6px;justify-content:center;margin:14px auto 0;user-select:none}.controls button{font-size:23px;padding:0;touch-action:manipulation}.controls .up{grid-column:2;grid-row:1}.controls .left{grid-column:1;grid-row:2}.controls .down{grid-column:2;grid-row:2}.controls .right{grid-column:3;grid-row:2}.hint{font-size:12px;color:#aeb8e8;line-height:1.5;margin-top:12px}
+</style>
+</head>
+<body>
+<main class="game">
+  <div class="top"><div class="logo">PAC-MAN</div><div class="stats"><div>PUNTOS<b id="score">0</b></div><div>VIDAS<b id="lives">3</b></div></div></div>
+  <div class="board-wrap"><canvas id="board" class="board" aria-label="Laberinto de Pac-Man"></canvas></div>
+  <div class="message" id="message" aria-live="polite">¡Come todos los puntos y evita a los fantasmas!</div>
+  <div class="actions"><button class="btn" id="startBtn">▶ Jugar / Continuar</button><button class="btn" id="pauseBtn">Ⅱ Pausar</button><button class="btn" id="restartBtn">↻ Reiniciar</button></div>
+  <div class="controls" aria-label="Controles táctiles"><button class="btn up" data-dir="up" aria-label="Arriba">▲</button><button class="btn left" data-dir="left" aria-label="Izquierda">◀</button><button class="btn down" data-dir="down" aria-label="Abajo">▼</button><button class="btn right" data-dir="right" aria-label="Derecha">▶</button></div>
+  <div class="hint">Controles: flechas del teclado o botones de dirección. Recoge los puntos pequeños y los grandes para asustar temporalmente a los fantasmas.</div>
+</main>
+<script>
+(()=>{
+const canvas=document.getElementById('board'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),message=document.getElementById('message');
+// # = pared, . = punto, o = power pellet, espacio = pasillo
+const original=[
+'###################',
+'#o.......#.......o#',
+'#.##.###.#.###.##.#',
+'#.................#',
+'#.##.#.#####.#.##.#',
+'#....#...#...#....#',
+'####.### # ###.####',
+'   #.#       #.#   ',
+'####.# ## ## #.####',
+'    .  #   #  .    ',
+'####.# ##### #.####',
+'   #.#       #.#   ',
+'####.# ##### #.####',
+'#........#........#',
+'#.##.###.#.###.##.#',
+'#o.#.....P.....#.o#',
+'##.#.#.#####.#.#.##',
+'#....#...#...#....#',
+'#.######.#.######.#',
+'#.................#',
+'###################'];
+const tile=22,rows=original.length,cols=original[0].length;canvas.width=cols*tile;canvas.height=rows*tile;
+let grid,player,ghosts,score,lives,powerUntil,running,paused,gameOver,lastTime,moveTimer,ghostTimer;
+const dirs={left:{x:-1,y:0},right:{x:1,y:0},up:{x:0,y:-1},down:{x:0,y:1}};
+function reset(){grid=original.map(r=>r.split(''));score=0;lives=3;powerUntil=0;player={x:9,y:15,dir:'left',next:'left'};ghosts=[{x:9,y:9,color:'#ff4c6a',homeX:9,homeY:9},{x:8,y:9,color:'#ff9de1',homeX:8,homeY:9},{x:10,y:9,color:'#4cecff',homeX:10,homeY:9}];
+// Clean and rebuild the center pen to keep it traversable.
+for(let y=8;y<=10;y++)for(let x=7;x<=11;x++)if(grid[y]&&grid[y][x]&&grid[y][x]!=='#')grid[y][x]=' ';
+// Place pellets consistently in open tiles.
+for(let y=0;y<rows;y++)for(let x=0;x<cols;x++)if(grid[y][x]==='P')grid[y][x]='.';
+grid[15][9]=' ';grid[9][9]=' ';grid[9][8]=' ';grid[9][10]=' ';
+// ensure starting area and ghost pen are clear
+player={x:9,y:15,dir:'left',next:'left'};ghosts=[{x:9,y:9,color:'#ff4c6a',homeX:9,homeY:9},{x:8,y:9,color:'#ff9de1',homeX:8,homeY:9},{x:10,y:9,color:'#4cecff',homeX:10,homeY:9}];
+// Make the map playable if a wall/pellet was overwritten at the spawn.
+scoreEl.textContent=score;livesEl.textContent=lives;running=false;paused=false;gameOver=false;message.textContent='¡Listo! Pulsa “Jugar” para comenzar.';draw();}
+function wall(x,y){if(y<0||y>=rows||x<0||x>=cols)return true;return grid[y][x]==='#';}
+function canMove(x,y,dir){const d=dirs[dir];return !wall(x+d.x,y+d.y)}
+function movePlayer(){if(canMove(player.x,player.y,player.next))player.dir=player.next;if(canMove(player.x,player.y,player.dir)){const d=dirs[player.dir];player.x+=d.x;player.y+=d.y;}if(player.x<0)player.x=cols-1;if(player.x>=cols)player.x=0;
+const cell=grid[player.y][player.x];if(cell==='.'||cell==='o'){score+=cell==='o'?50:10;grid[player.y][player.x]=' ';scoreEl.textContent=score;if(cell==='o'){powerUntil=Date.now()+7000;message.textContent='¡Modo poder! Puedes comerte a los fantasmas.';}if(!grid.some(row=>row.some(c=>c==='.'||c==='o'))){running=false;gameOver=true;message.textContent='¡Ganaste! Limpiaste todo el laberinto. 🎉';}}
+}
+function moveGhost(g){let options=Object.keys(dirs).filter(d=>canMove(g.x,g.y,d));if(!options.length)return;let chosen;
+if(Date.now()<powerUntil){chosen=options[Math.floor(Math.random()*options.length)];}
+else{options.sort((a,b)=>{const da=dirs[a],db=dirs[b];return (Math.abs(g.x+da.x-player.x)+Math.abs(g.y+da.y-player.y))-(Math.abs(g.x+db.x-player.x)+Math.abs(g.y+db.y-player.y));});chosen=Math.random()<.72?options[0]:options[Math.floor(Math.random()*options.length)];}
+const d=dirs[chosen];g.x+=d.x;g.y+=d.y;
+}
+function collision(){for(const g of ghosts){if(g.x===player.x&&g.y===player.y){if(Date.now()<powerUntil){score+=200;scoreEl.textContent=score;g.x=g.homeX;g.y=g.homeY;}else{lives--;livesEl.textContent=lives;if(lives<=0){running=false;gameOver=true;message.textContent='Fin del juego. Pulsa Reiniciar para intentarlo otra vez.';}else{player.x=9;player.y=15;player.dir='left';player.next='left';message.textContent='¡Cuidado! Te queda(n) '+lives+' vida(s).';}return;}}}}
+function draw(){ctx.fillStyle='#03040d';ctx.fillRect(0,0,canvas.width,canvas.height);for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){const c=grid[y][x],px=x*tile,py=y*tile;if(c==='#'){ctx.fillStyle='#1527a5';ctx.fillRect(px,py,tile,tile);ctx.strokeStyle='#526bff';ctx.lineWidth=1.4;ctx.strokeRect(px+2,py+2,tile-4,tile-4);}else if(c==='.'||c==='o'){ctx.beginPath();ctx.fillStyle=c==='o'?'#fff5a0':'#ffedb5';ctx.arc(px+tile/2,py+tile/2,c==='o'?5:2.2,0,Math.PI*2);ctx.fill();}}
+// Pac-Man
+const cx=player.x*tile+tile/2,cy=player.y*tile+tile/2,ang={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2}[player.dir]||0;ctx.fillStyle='#ffeb25';ctx.beginPath();ctx.moveTo(cx,cy);const mouth=.22+Math.abs(Math.sin(Date.now()/95))*.34;ctx.arc(cx,cy,tile*.43,ang+mouth,ang+Math.PI*2-mouth);ctx.closePath();ctx.fill();
+for(const g of ghosts){const frightened=Date.now()<powerUntil;const gx=g.x*tile,gy=g.y*tile;ctx.fillStyle=frightened?'#314dff':g.color;ctx.beginPath();ctx.arc(gx+tile/2,gy+tile*.43,tile*.39,Math.PI,0);ctx.lineTo(gx+tile*.89,gy+tile*.85);ctx.lineTo(gx+tile*.68,gy+tile*.72);ctx.lineTo(gx+tile*.5,gy+tile*.86);ctx.lineTo(gx+tile*.3,gy+tile*.72);ctx.lineTo(gx+tile*.11,gy+tile*.85);ctx.closePath();ctx.fill();ctx.fillStyle='white';ctx.beginPath();ctx.ellipse(gx+tile*.38,gy+tile*.42,3.2,4.4,0,0,Math.PI*2);ctx.ellipse(gx+tile*.64,gy+tile*.42,3.2,4.4,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#14204b';ctx.beginPath();ctx.arc(gx+tile*.39,gy+tile*.43,1.7,0,Math.PI*2);ctx.arc(gx+tile*.65,gy+tile*.43,1.7,0,Math.PI*2);ctx.fill();}}
+function loop(now){if(!lastTime)lastTime=now;const dt=now-lastTime;lastTime=now;if(running&&!paused&&!gameOver){moveTimer+=dt;ghostTimer+=dt;if(moveTimer>125){moveTimer=0;movePlayer();collision();}if(ghostTimer>390){ghostTimer=0;ghosts.forEach(moveGhost);collision();}if(Date.now()>powerUntil&&message.textContent.startsWith('¡Modo poder'))message.textContent='¡Come todos los puntos y evita a los fantasmas!';}draw();requestAnimationFrame(loop)}
+function start(){if(gameOver)return;running=true;paused=false;message.textContent='¡A jugar!';}
+function pause(){if(gameOver)return;paused=!paused;message.textContent=paused?'Juego pausado.':'¡A jugar!';}
+function setDir(d){if(dirs[d])player.next=d;if(!running&&!gameOver)start();}
+document.addEventListener('keydown',e=>{const map={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down',a:'left',d:'right',w:'up',s:'down'};if(map[e.key]){e.preventDefault();setDir(map[e.key]);}if(e.key===' '){e.preventDefault();if(!running)start();else pause();}});
+document.querySelectorAll('[data-dir]').forEach(b=>{b.addEventListener('pointerdown',e=>{e.preventDefault();setDir(b.dataset.dir);});});
+document.getElementById('startBtn').addEventListener('click',start);document.getElementById('pauseBtn').addEventListener('click',pause);document.getElementById('restartBtn').addEventListener('click',()=>{reset();start();});
+reset();moveTimer=0;ghostTimer=0;requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
